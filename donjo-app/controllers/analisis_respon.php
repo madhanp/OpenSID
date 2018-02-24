@@ -212,4 +212,13 @@ class analisis_respon extends CI_Controller{
 		else unset($_SESSION['rt']);
 		redirect('analisis_respon');
 	}
+	function form_impor_bdt(){
+		$data['form_action'] = site_url("analisis_respon/impor_bdt/");
+		$this->load->view('analisis_respon/import/impor_bdt',$data);
+	}
+	function impor_bdt(){
+		$this->load->model('bdt_model');
+		$this->bdt_model->impor();
+		// redirect('analisis_respon');
+	}
 }
