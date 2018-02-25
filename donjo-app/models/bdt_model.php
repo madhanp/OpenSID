@@ -54,7 +54,7 @@
 		}
 		$gagal = 0;
 		$data_sheet = $data->sheets[0]['cells'];
-		for($i=$baris_pertama; $i<$baris; $i++){
+		for($i=$baris_pertama; $i<=$baris; $i++){
 			if (!$this->tulis_rtm($data_sheet[$i])) $gagal++;
 		}
 		echo "<br>JUMLAH GAGAL : $gagal</br>";
@@ -92,23 +92,25 @@
 			echo "<a>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == tidak ditemukan di database penduduk. </a><br>";
 			return false;
 		} else {
-			$penduduk = array();
-			$penduduk['id_rtm'] = $id_rtm;
-			$penduduk['rtm_level'] = $rtm_level;
-			$this->db->where('nik',$nik)->update('tweb_penduduk',$penduduk);
-
-			if($rtm_level == 1) {
-				$rtm['id'] = $id_rtm;
-				$rtm['nik_kepala'] = $query->row()->id;
-				$rtm['no_kk'] = $id_rtm;
-	      // Tambah rtm atau update kalau sudah ada
-	      $sql = $this->db->insert_string('tweb_rtm', $rtm);
-	      $sql .= " ON DUPLICATE KEY UPDATE
-	          nik_kepala = VALUES(nik_kepala),
-	          no_kk = VALUES(no_kk)";
-	      $this->db->query($sql);
+			$rtm = $this->db->where('no_kk',$id_rtm)->get('tweb_rtm')->row()->id;
+			if($rtm){
+				// Update
+				if($rtm_level == 1){
+					$this->db->update('tweb_rtm',array('nik_kepala' => $query->row()->id));
+				}
+			} else {
+				// Tambah
+				$rtm_data = array();
+				$rtm_data['no_kk'] = $id_rtm;
+				if($rtm_level == 1) $rtm_data['nik_kepala'] = $query->row()->id;
+	      $this->db->insert('tweb_rtm', $rtm_data);
+	      $rtm = $this->db->insert_id();
 			}
 		}
+		$penduduk = array();
+		$penduduk['id_rtm'] = $rtm;
+		$penduduk['rtm_level'] = $rtm_level;
+		$this->db->where('nik',$nik)->update('tweb_penduduk',$penduduk);
 		return true;
 	}
 
