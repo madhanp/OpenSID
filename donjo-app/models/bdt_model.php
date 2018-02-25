@@ -7,7 +7,9 @@
 			'id_rtm' => 2,
 			'nama' => 80,
 			'nik' => 81,
-			'rtm_level' => 82
+			'rtm_level' => 82,
+			'awal_respon_rt' => 14,
+			'awal_respon_penduduk' => 82
 		);
 	}
 
@@ -45,20 +47,47 @@
 		$data = new Spreadsheet_Excel_Reader($_FILES['bdt']['tmp_name']);
 
 		// membaca jumlah baris dari data excel
-		$baris = $data->rowcount($sheet_index=0);
-		$baris_pertama = $this->cari_baris_pertama($data, $baris);
-		if ($baris_pertama <= 0) {
+		$this->$baris = $data->rowcount($sheet_index=0);
+		$$this->baris_pertama = $this->cari_baris_pertama($data, $this->$baris);
+		if ($$this->baris_pertama <= 0) {
 			$_SESSION['error_msg'].= " -> Tidak ada data";
 			$_SESSION['success']=-1;
 			return;
 		}
-		$gagal = 0;
-		$data_sheet = $data->sheets[0]['cells'];
-		for($i=$baris_pertama; $i<=$baris; $i++){
-			if (!$this->tulis_rtm($data_sheet[$i])) $gagal++;
+
+		if ($tipe_analisis == 'rumah_tangga'){
+			$this->kolom_subjek = $this->kolom['id_rtm'];
+			$this->kolom_indikator_pertama = $this->kolom['awal_respon_rt'];
+		} else {
+			$this->kolom_subjek = $this->kolom['nik'];
+			$this->kolom_indikator_pertama = $this->kolom['awal_respon_penduduk'];
 		}
+
+		$gagal = 0;
+		$this->abaikan = array();
+		$data_sheet = $data->sheets[0]['cells'];
+		for($i=$this->baris_pertama; $i<=$baris; $i++){
+			if (!$this->tulis_rtm($data_sheet[$i])) {
+				$this->abaikan[] = $data_sheet[$i][$this->kolom['nik']];
+				$gagal++;
+			}
+			// kumpulkan semua subjek (NIK untuk penduduk atau id_rtm utk rumah tangga ...)
+			$this->list_subjek[] = $data_sheet[$i][$this->kolom_subjek];
+		}
+		// ambil semua id_subjek (cari menggunakan NIK atau id_rtm  --> $list_id_subjek)
+		// $list_id_subjek = array(nik => id atau id_rtm => id, ..)
+		$this->hapus_respon($list_id_subjek);
+		$this->impor_respon($data_sheet);
+
+
 		echo "<br>JUMLAH GAGAL : $gagal</br>";
 		echo "<a href='".site_url()."analisis_respon'>LANJUT</a>";
+	}
+
+	private function hapus_respon($list_id_subject){
+		$per = $this->get_aktif_periode();
+			$sql = "DELETE FROM analisis_respon WHERE id_subjek IN(?) AND id_periode=?";
+			$this->db->query($sql,array($list_id_subject,$per));
 	}
 
 	private function cari_baris_pertama($data, $baris) {
@@ -114,5 +143,107 @@
 		return true;
 	}
 
+	private function impor_respon($data_sheet){
+		$sql = "SELECT * FROM analisis_indikator WHERE id_master=? ORDER BY id ASC";
+		$query = $this->db->query($sql,$_SESSION['analisis_master']);
+		$indikator = $query->result_array();
+		$n = 0;
+		$respon = array();
+		$kolom = $this->kolom_indikator_pertama;
+		for($i=$this->baris_pertama; $i<=$this->baris; $i++){
+			// Jangan impor jika NIK tidak ada di database
+			if($data_sheet[$i][$this->kolom['nik']] in $this_abaikan){
+				continue;
+			}
+
+			// cari id_subjek
+			// id_subjek = $this->list_id_subjek[$data_sheet[$i][$this->kolom['nik']] atau 'id_rtm']
+			foreach($indikator as $key => $indi){
+				$isi = $data_sheet[$i][$kolom + $key];
+				switch ($indi['id_tipe']) {
+					case 1:
+						$list_parameter = $this->respon_pilihan_tunggal($indi['id'],$isi);
+						break;
+					case 2:
+						$list_parameter = $this->respon_pilihan_ganda($indi['id'],$isi);
+						break;
+
+					default:
+						$list_parameter = $this->respon_isian($indi['id'],$isi);
+						break;
+				}
+				// Himpun respon untuk semua indikator untuk semua baris
+				foreach($list_paramater as $parameter){
+					$respon[$n]['id_indikator']	= $indi['id'];
+					$respon[$n]['id_subjek']		= $this->list_id_subjek[$data_sheet[$i][$this->kolom_subjek]];
+					$respon[$n]['id_periode']		= $per;
+					$respon[$n]['parameter'] = $parameter;
+					$n++;
+				}
+			}
+		}
+		if($n>0)
+			$outp = $this->db->insert_batch('analisis_respon',$respon);
+		else
+			$outp = false;
+		$this->pre_update();
+
+		if($outp) $_SESSION['success']=1;
+			else $_SESSION['success']=-1;
+	}
+
+	private function respon_pilihan_tunggal($id_indikator, $isi){
+		$param = $this->db->select('id')
+				->where('id_indikator',$id_indikator)
+				->where('kode_jawaban',$isi)
+				->get('analisis_parameter')
+				->row_array();
+		if($param){
+			$in_param = $param['id'];
+		}else{
+			if($isi == "")
+				$in_param = 0;
+			else
+				$in_param = -1;
+		}
+		return array($in_param);
+	}
+
+	private function respon_pilihan_ganda($id_indikator, $isi){
+		$id_isi = explode(",",$isi);
+		$in_param = array();
+		foreach ($id_isi as $isi){
+			$param = $this->db->select('id')
+					->where('id_indikator',$id_indikator)
+					->where('kode_jawaban',$isi)
+					->get('analisis_parameter')
+					->row_array();
+			if($param['id'] != ""){
+				$in_param[] = $param['id'];
+			}
+		}
+		return $in_param;
+	}
+
+	private function respon_isian($id_indikator, $isi){
+		$param = $this->db->select('id')
+				->where('id_indikator',$id_indikator)
+				->where('kode_jawaban',$isi)
+				->get('analisis_parameter')
+				->row_array();
+
+		// apakah sdh ada jawaban yg sama
+		if($param){
+			$in_param = $param['id'];
+		}else{
+			$paramater = array();
+			$parameter['jawaban']	= $isi;
+			$parameter['id_indikator']	= $id_indikator;
+			$parameter['asign']			= 0;
+			$this->db->insert('analisis_parameter',$parameter);
+			$in_param = $this->db->insert_id();
+		}
+		return array($in_param);
+	}
 }
 ?>
