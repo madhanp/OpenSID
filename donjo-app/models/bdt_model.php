@@ -56,7 +56,7 @@
 
 		$data = new Spreadsheet_Excel_Reader($_FILES['bdt']['tmp_name']);
 		// Baca jumlah baris berkas BDT
-		$this->jml_baris = $data->rowcount(0);
+		$this->jml_baris = $data->rowcount($sheet_index=0);
 		$this->baris_pertama = $this->cari_baris_pertama($data, $this->jml_baris);
 		if ($this->baris_pertama <= 0) {
 			$_SESSION['error_msg'].= " -> Tidak ada data";
@@ -122,7 +122,7 @@
 	    $list_subjek_str .= $prefix . "'" . $subjek . "'";
 	    $prefix = ', ';
 		}
-		$list_data = $this->db->select("id,$id_subjek")->where("no_kk in($list_subjek_str)")
+		$list_data = $this->db->select("id,$id_subjek")->where("$id_subjek in($list_subjek_str)")
 				->get($tabel_subjek)->result_array();
 		$list_id_subjek = array();
 		foreach($list_data as $data){
