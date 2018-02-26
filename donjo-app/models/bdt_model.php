@@ -1,5 +1,14 @@
 <?php class Bdt_Model extends CI_Model{
 
+	private $jml_baris;
+	private $baris_pertama;
+	private $kolom;
+	private $kolom_subjek;
+	private $kolom_indikator_pertama;
+	private $abaikan;
+	private $list_subjek;
+	private $list_id_subjek;
+
 	function __construct(){
 		parent::__construct();
 
@@ -22,7 +31,6 @@
 			$_SESSION['success']=-1;
 			return false;
 		}
-
 	  $tipe_file = TipeFile($_FILES['bdt']);
 		$mime_type_excel = array("application/vnd.ms-excel", "application/octet-stream");
 		if(!in_array($tipe_file, $mime_type_excel)){
@@ -30,12 +38,14 @@
 			$_SESSION['success']=-1;
 			return false;
 		}
-
 		return true;
 	}
 
 	/*
-	 * Impor data BDT 2015 ke dalam analisis
+	 * 1. Impor pengelompokan rumah tangga
+	 * 2. Impor data BDT 2015 ke dalam analisis_respon
+	 *
+	 * Abaikan subjek di data BDT yang tidak ada di database
 	*/
 	function impor(){
 		$_SESSION['error_msg'] = '';
@@ -45,58 +55,108 @@
 		}
 
 		$data = new Spreadsheet_Excel_Reader($_FILES['bdt']['tmp_name']);
-
-		// membaca jumlah baris dari data excel
-		$this->$baris = $data->rowcount($sheet_index=0);
-		$$this->baris_pertama = $this->cari_baris_pertama($data, $this->$baris);
-		if ($$this->baris_pertama <= 0) {
+		// Baca jumlah baris berkas BDT
+		$this->jml_baris = $data->rowcount(0);
+		$this->baris_pertama = $this->cari_baris_pertama($data, $this->jml_baris);
+		if ($this->baris_pertama <= 0) {
 			$_SESSION['error_msg'].= " -> Tidak ada data";
 			$_SESSION['success']=-1;
 			return;
 		}
 
-		if ($tipe_analisis == 'rumah_tangga'){
+		// BDT2015 terbatas pada subjek rumah tangga dan penduduk
+		if ($_SESSION['subjek_tipe'] == 3){
+			// Rumah tangga
 			$this->kolom_subjek = $this->kolom['id_rtm'];
 			$this->kolom_indikator_pertama = $this->kolom['awal_respon_rt'];
 		} else {
+			// Penduduk
 			$this->kolom_subjek = $this->kolom['nik'];
 			$this->kolom_indikator_pertama = $this->kolom['awal_respon_penduduk'];
 		}
 
 		$gagal = 0;
 		$this->abaikan = array();
+		$this->list_subjek = array();
 		$data_sheet = $data->sheets[0]['cells'];
-		for($i=$this->baris_pertama; $i<=$baris; $i++){
+		for($i=$this->baris_pertama; $i<=$this->jml_baris; $i++){
 			if (!$this->tulis_rtm($data_sheet[$i])) {
 				$this->abaikan[] = $data_sheet[$i][$this->kolom['nik']];
 				$gagal++;
 			}
-			// kumpulkan semua subjek (NIK untuk penduduk atau id_rtm utk rumah tangga ...)
-			$this->list_subjek[] = $data_sheet[$i][$this->kolom_subjek];
+			// Kumpulkan semua subjek (NIK untuk penduduk atau id_rtm utk rumah tangga)
+			if(!in_array($data_sheet[$i][$this->kolom_subjek], $this->list_subjek))
+				$this->list_subjek[] = $data_sheet[$i][$this->kolom_subjek];
 		}
-		// ambil semua id_subjek (cari menggunakan NIK atau id_rtm  --> $list_id_subjek)
-		// $list_id_subjek = array(nik => id atau id_rtm => id, ..)
-		$this->hapus_respon($list_id_subjek);
-		$this->impor_respon($data_sheet);
+		echo '<br><br>';
+		echo var_dump($this->list_subjek);
 
+		$this->list_id_subjek = $this->get_id_subjek($this->list_subjek);
+
+		echo '<br><br>';
+		echo var_dump($this->list_id_subjek);
+
+		$this->hapus_respon($this->list_id_subjek);
+		$this->impor_respon($data_sheet);
 
 		echo "<br>JUMLAH GAGAL : $gagal</br>";
 		echo "<a href='".site_url()."analisis_respon'>LANJUT</a>";
 	}
 
-	private function hapus_respon($list_id_subject){
-		$per = $this->get_aktif_periode();
-			$sql = "DELETE FROM analisis_respon WHERE id_subjek IN(?) AND id_periode=?";
-			$this->db->query($sql,array($list_id_subject,$per));
+	/*
+		Ambil id untuk semua subjek.
+		Hasilkan $list_id_subjek[nik] = id-penduduk atau $list_id_subjek[id_rtm] = id-rumah-tangga
+	*/
+	private function get_id_subjek($list_subjek){
+		if ($_SESSION['subjek_tipe'] == 3){
+			// rumah tangga
+			$id_subjek = 'no_kk';
+			$tabel_subjek = 'tweb_rtm';
+		} else {
+			// penduduk
+			$id_subjek = 'nik';
+			$tabel_subjek = 'tweb_penduduk';
+		}
+		$prefix = $list_subjek_str = '';
+		foreach ($list_subjek as $subjek){
+	    $list_subjek_str .= $prefix . "'" . $subjek . "'";
+	    $prefix = ', ';
+		}
+		$list_data = $this->db->select("id,$id_subjek")->where("no_kk in($list_subjek_str)")
+				->get($tabel_subjek)->result_array();
+		$list_id_subjek = array();
+		foreach($list_data as $data){
+			$list_id_subjek[$data[$id_subjek]] = $data['id'];
+		}
+		return $list_id_subjek;
 	}
 
-	private function cari_baris_pertama($data, $baris) {
-		if ($baris <=1 )
+	/*
+		Hapus semua respon untuk semua subjek pada periode aktif
+	*/
+	private function hapus_respon($list_id_subjek){
+		$per = $this->analisis_respon_model->get_aktif_periode();
+		$prefix = $list_id_subjek_str = '';
+		foreach($list_id_subjek as $subjek => $id){
+	    $list_id_subjek_str .= $prefix . "'" . $id . "'";
+	    $prefix = ', ';
+		}
+
+		echo '<br><br>';
+		echo var_dump($list_id_subjek_str);
+
+		$this->db->where("id_subjek in($list_id_subjek_str)")
+				->where('id_periode',$per)
+				->delete('analisis_respon');
+	}
+
+	private function cari_baris_pertama($data, $jml_baris) {
+		if ($jml_baris <=1 )
 			return 0;
 
 		$ada_baris = false;
 		// Baris pertama baris judul kolom
-		for ($i=2; $i<=$baris; $i++){
+		for ($i=2; $i<=$jml_baris; $i++){
 			// Baris kedua yang mungkin ditambahkan untuk memudahkan penomoran kolom
 			if($data->val($i,1) == 'KOLOM' or empty($data->val($i,1))) {
 				continue;
@@ -121,11 +181,13 @@
 			echo "<a>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == tidak ditemukan di database penduduk. </a><br>";
 			return false;
 		} else {
+			echo "<a>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == ok. </a><br>";
 			$rtm = $this->db->where('no_kk',$id_rtm)->get('tweb_rtm')->row()->id;
 			if($rtm){
 				// Update
 				if($rtm_level == 1){
-					$this->db->update('tweb_rtm',array('nik_kepala' => $query->row()->id));
+					$this->db->where('id',$rtm)
+						->update('tweb_rtm',array('nik_kepala' => $query->row()->id));
 				}
 			} else {
 				// Tambah
@@ -144,55 +206,63 @@
 	}
 
 	private function impor_respon($data_sheet){
-		$sql = "SELECT * FROM analisis_indikator WHERE id_master=? ORDER BY id ASC";
-		$query = $this->db->query($sql,$_SESSION['analisis_master']);
-		$indikator = $query->result_array();
+		$per = $this->analisis_respon_model->get_aktif_periode();
+		$indikator = $this->db->where('id_master',$_SESSION['analisis_master'])
+				->order_by('id')->get('analisis_indikator')
+				->result_array();
 		$n = 0;
 		$respon = array();
 		$kolom = $this->kolom_indikator_pertama;
-		for($i=$this->baris_pertama; $i<=$this->baris; $i++){
-			// Jangan impor jika NIK tidak ada di database
-			if($data_sheet[$i][$this->kolom['nik']] in $this_abaikan){
-				continue;
-			}
+		$sudah_proses = array();
+		for($i=$this->baris_pertama; $i<=$this->jml_baris; $i++){
 
-			// cari id_subjek
-			// id_subjek = $this->list_id_subjek[$data_sheet[$i][$this->kolom['nik']] atau 'id_rtm']
+			// Jangan impor jika NIK tidak ada di database
+			if(in_array($data_sheet[$i][$this->kolom['nik']],$this->abaikan))continue;
+			// Proses setiap subjek sekali saja
+			if(in_array($data_sheet[$i][$this->kolom_subjek], $sudah_proses)) continue;
+			else $sudah_proses[] = $data_sheet[$i][$this->kolom_subjek];
+
 			foreach($indikator as $key => $indi){
 				$isi = $data_sheet[$i][$kolom + $key];
 				switch ($indi['id_tipe']) {
 					case 1:
-						$list_parameter = $this->respon_pilihan_tunggal($indi['id'],$isi);
+						$list_parameter = $this->parameter_pilihan_tunggal($indi['id'],$isi);
 						break;
 					case 2:
-						$list_parameter = $this->respon_pilihan_ganda($indi['id'],$isi);
+						$list_parameter = $this->parameter_pilihan_ganda($indi['id'],$isi);
 						break;
 
 					default:
-						$list_parameter = $this->respon_isian($indi['id'],$isi);
+						$list_parameter = $this->parameter_isian($indi['id'],$isi);
 						break;
 				}
 				// Himpun respon untuk semua indikator untuk semua baris
-				foreach($list_paramater as $parameter){
-					$respon[$n]['id_indikator']	= $indi['id'];
-					$respon[$n]['id_subjek']		= $this->list_id_subjek[$data_sheet[$i][$this->kolom_subjek]];
-					$respon[$n]['id_periode']		= $per;
-					$respon[$n]['parameter'] = $parameter;
-					$n++;
+				foreach($list_parameter as $parameter){
+					if(!empty($parameter)){
+						$respon[$n]['id_indikator']	= $indi['id'];
+						$respon[$n]['id_subjek']		= $this->list_id_subjek[$data_sheet[$i][$this->kolom_subjek]];
+						$respon[$n]['id_periode']		= $per;
+						$respon[$n]['id_parameter'] = $parameter;
+						$n++;
+					}
 				}
 			}
 		}
+
+		echo '<br><br>';
+		echo var_dump($respon);
+
 		if($n>0)
 			$outp = $this->db->insert_batch('analisis_respon',$respon);
 		else
 			$outp = false;
-		$this->pre_update();
+		$this->analisis_respon_model->pre_update();
 
 		if($outp) $_SESSION['success']=1;
 			else $_SESSION['success']=-1;
 	}
 
-	private function respon_pilihan_tunggal($id_indikator, $isi){
+	private function parameter_pilihan_tunggal($id_indikator, $isi){
 		$param = $this->db->select('id')
 				->where('id_indikator',$id_indikator)
 				->where('kode_jawaban',$isi)
@@ -209,7 +279,8 @@
 		return array($in_param);
 	}
 
-	private function respon_pilihan_ganda($id_indikator, $isi){
+	private function parameter_pilihan_ganda($id_indikator, $isi){
+		if(empty($isi)) return array(null);
 		$id_isi = explode(",",$isi);
 		$in_param = array();
 		foreach ($id_isi as $isi){
@@ -225,10 +296,11 @@
 		return $in_param;
 	}
 
-	private function respon_isian($id_indikator, $isi){
+	private function parameter_isian($id_indikator, $isi){
+		if(empty($isi)) return array(null);
 		$param = $this->db->select('id')
 				->where('id_indikator',$id_indikator)
-				->where('kode_jawaban',$isi)
+				->where('jawaban',$isi)
 				->get('analisis_parameter')
 				->row_array();
 
@@ -236,10 +308,11 @@
 		if($param){
 			$in_param = $param['id'];
 		}else{
-			$paramater = array();
+			// simpan setiap jawaban yang baru
+			$parameter = array();
 			$parameter['jawaban']	= $isi;
-			$parameter['id_indikator']	= $id_indikator;
-			$parameter['asign']			= 0;
+			$parameter['id_indikator'] = $id_indikator;
+			$parameter['asign']	= 0;
 			$this->db->insert('analisis_parameter',$parameter);
 			$in_param = $this->db->insert_id();
 		}
