@@ -89,16 +89,16 @@
 					$this->list_subjek[] = $data_sheet[$i][$this->kolom_subjek];
 			}
 		}
-		echo '<br>$this->abaikan';
-		echo var_dump($this->abaikan);
+		// echo '<br>$this->abaikan';
+		// echo var_dump($this->abaikan);
 
-		echo '<br><br>';
-		echo var_dump($this->list_subjek);
+		// echo '<br><br>';
+		// echo var_dump($this->list_subjek);
 
 		$this->list_id_subjek = $this->get_id_subjek($this->list_subjek);
 
-		echo '<br><br>';
-		echo var_dump($this->list_id_subjek);
+		// echo '<br><br>';
+		// echo var_dump($this->list_id_subjek);
 
 		$this->hapus_respon($this->list_id_subjek);
 		$this->impor_respon($data_sheet);
@@ -146,8 +146,8 @@
 	    $prefix = ', ';
 		}
 
-		echo '<br><br>';
-		echo var_dump($list_id_subjek_str);
+		// echo '<br><br>';
+		// echo var_dump($list_id_subjek_str);
 
 		$this->db->where("id_subjek in($list_id_subjek_str)")
 				->where('id_periode',$per)
@@ -185,7 +185,7 @@
 			echo "<a style='color: red;'>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == tidak ditemukan di database penduduk. </a><br>";
 			return false;
 		} else {
-			echo "<a>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == ok. </a><br>";
+			// echo "<a>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == ok. </a><br>";
 			$rtm = $this->db->where('no_kk',$id_rtm)->get('tweb_rtm')->row()->id;
 			if($rtm){
 				// Update
@@ -252,8 +252,8 @@
 			}
 		}
 
-		echo '<br><br>';
-		echo var_dump($respon);
+		// echo '<br><br>';
+		// echo var_dump($respon);
 
 		if($n>0)
 			$outp = $this->db->insert_batch('analisis_respon',$respon);
