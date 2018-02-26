@@ -83,11 +83,15 @@
 			if (!$this->tulis_rtm($data_sheet[$i])) {
 				$this->abaikan[] = $data_sheet[$i][$this->kolom['nik']];
 				$gagal++;
+			} else {
+				// Kumpulkan semua subjek (NIK untuk penduduk atau id_rtm utk rumah tangga)
+				if(!in_array($data_sheet[$i][$this->kolom_subjek], $this->list_subjek))
+					$this->list_subjek[] = $data_sheet[$i][$this->kolom_subjek];
 			}
-			// Kumpulkan semua subjek (NIK untuk penduduk atau id_rtm utk rumah tangga)
-			if(!in_array($data_sheet[$i][$this->kolom_subjek], $this->list_subjek))
-				$this->list_subjek[] = $data_sheet[$i][$this->kolom_subjek];
 		}
+		echo '<br>$this->abaikan';
+		echo var_dump($this->abaikan);
+
 		echo '<br><br>';
 		echo var_dump($this->list_subjek);
 
@@ -178,7 +182,7 @@
 		$query = $this->db->where('nik',$nik)->get('tweb_penduduk');
 		if ($query->num_rows() == 0){
 			// Laporkan penduduk BDT tidak ada di database
-			echo "<a>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == tidak ditemukan di database penduduk. </a><br>";
+			echo "<a style='color: red;'>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == tidak ditemukan di database penduduk. </a><br>";
 			return false;
 		} else {
 			echo "<a>".$id_rtm." ".$rtm_level." ".$nik." ".$baris[$this->kolom['nama']]." == ok. </a><br>";
@@ -215,7 +219,6 @@
 		$kolom = $this->kolom_indikator_pertama;
 		$sudah_proses = array();
 		for($i=$this->baris_pertama; $i<=$this->jml_baris; $i++){
-
 			// Jangan impor jika NIK tidak ada di database
 			if(in_array($data_sheet[$i][$this->kolom['nik']],$this->abaikan))continue;
 			// Proses setiap subjek sekali saja
